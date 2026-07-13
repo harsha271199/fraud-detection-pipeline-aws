@@ -31,3 +31,4 @@ airflow/.env
 
 # OS
 .DS_Store
+terraform/outputs.txt
