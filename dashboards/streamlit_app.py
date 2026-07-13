@@ -1,6 +1,4 @@
-"""
-Public dashboard on top of a static snapshot of gold_fraud_kpis_hourly.
-"""
+﻿import os
 import pandas as pd
 import streamlit as st
 
@@ -9,22 +7,13 @@ st.set_page_config(page_title="Fraud Pipeline KPIs", layout="wide")
 
 @st.cache_data
 def load_kpis() -> pd.DataFrame:
-    return pd.read_csv("data/gold_snapshot.csv", parse_dates=["event_hour"])
+    csv_path = os.path.join(os.path.dirname(__file__), "data", "gold_snapshot.csv")
+    return pd.read_csv(csv_path, parse_dates=["event_hour"])
 
 
-st.title("Real-time fraud pipeline — KPI snapshot")
-st.caption(
-    "AWS pipeline: MSK -> S3 (bronze/silver/gold) -> Airflow + dbt -> Redshift. "
-    "Precision/recall computed against synthetic fraud labels injected by the producer."
-)
-st.info(
-    "This dashboard shows a **static snapshot** captured from a real, live run "
-    "of the full pipeline — not a live connection. The AWS infrastructure "
-    "(MSK, Redshift) was intentionally torn down after capturing this data "
-    "to avoid ongoing cloud costs. See the project README for the full "
-    "architecture and how to re-provision the live infrastructure.",
-    icon="ℹ️",
-)
+st.title("Real-time fraud pipeline - KPI snapshot")
+st.caption("AWS pipeline: MSK -> S3 (bronze/silver/gold) -> Airflow + dbt -> Redshift. Precision/recall computed against synthetic fraud labels injected by the producer.")
+st.info("This dashboard shows a static snapshot captured from a real, live run of the full pipeline, not a live connection. The AWS infrastructure (MSK, Redshift) was intentionally torn down after capturing this data to avoid ongoing cloud costs. See the project README for the full architecture.")
 
 df = load_kpis()
 
@@ -51,4 +40,4 @@ else:
     st.subheader("Raw hourly KPIs (snapshot)")
     st.dataframe(df, use_container_width=True)
 
-st.caption("Full source code, Terraform infrastructure, and architecture: see the [GitHub repo](https://github.com/harsha271199/fraud-detection-pipeline-aws).")
+st.caption("Full source code, Terraform infrastructure, and architecture: see the GitHub repo at github.com/harsha271199/fraud-detection-pipeline-aws")
