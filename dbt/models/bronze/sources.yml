@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: spectrum_schema
+    tables:
+      - name: transactions_external
+        description: >
+          Redshift Spectrum external table over
+          s3://<data-lake-bucket>/bronze/transactions/,
+          partitioned by year/month/day. Created once via a CREATE EXTERNAL
+          TABLE statement (not managed by dbt) pointing at the Terraform-
+          provisioned S3 bucket and an AWS Glue catalog.

@@ -1,0 +1,84 @@
+"""
+One-time setup: creates the Spectrum external schema/table so Redshift
+can query the S3 bronze data directly. Run this once after Terraform
+has provisioned Redshift Serverless and your pipeline has written at
+least one batch of data to S3.
+
+Usage:
+    python setup_spectrum.py --host <redshift-endpoint> --password <redshift-password>
+"""
+import argparse
+
+import redshift_connector
+
+CREATE_SCHEMA_SQL = """
+CREATE EXTERNAL SCHEMA IF NOT EXISTS spectrum_schema
+FROM DATA CATALOG
+DATABASE 'fraud_pipeline_db'
+IAM_ROLE '{role_arn}'
+CREATE EXTERNAL DATABASE IF NOT EXISTS;
+"""
+
+CREATE_TABLE_SQL = """
+CREATE EXTERNAL TABLE spectrum_schema.transactions_external (
+    event_id varchar(64),
+    user_id varchar(64),
+    card_fingerprint varchar(64),
+    amount double precision,
+    billing_location varchar(16),
+    shipping_location varchar(16),
+    timestamp varchar(64),
+    flagged boolean,
+    fraud_score int,
+    flag_reasons varchar(256),
+    is_synthetic_fraud boolean
+)
+ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
+LOCATION 's3://{bucket}/bronze/transactions/';
+"""
+
+VERIFY_SQL = "SELECT * FROM spectrum_schema.transactions_external LIMIT 10;"
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", required=True, help="Redshift Serverless endpoint (no port)")
+    parser.add_argument("--database", default="frauddb")
+    parser.add_argument("--user", default="fraudadmin")
+    parser.add_argument("--password", required=True)
+    parser.add_argument("--role-arn", required=True, help="redshift_s3_read_role_arn from terraform output")
+    parser.add_argument("--bucket", required=True, help="data_lake_bucket_name from terraform output")
+    args = parser.parse_args()
+
+    conn = redshift_connector.connect(
+        host=args.host,
+        database=args.database,
+        user=args.user,
+        password=args.password,
+    )
+    conn.autocommit = True
+    cursor = conn.cursor()
+
+    print("Creating external schema...")
+    cursor.execute(CREATE_SCHEMA_SQL.format(role_arn=args.role_arn))
+
+    print("Creating external table...")
+    cursor.execute(CREATE_TABLE_SQL.format(bucket=args.bucket))
+
+    print("Verifying - querying 10 rows from your live S3 data...")
+    cursor.execute(VERIFY_SQL)
+    rows = cursor.fetchall()
+
+    if not rows:
+        print("No rows returned - check that your producer/consumer have written data to S3 yet.")
+    else:
+        print(f"Success - {len(rows)} rows returned. Spectrum is reading your live pipeline data.")
+        for row in rows[:3]:
+            print(row)
+
+    cursor.close()
+    conn.close()
+
+
+if __name__ == "__main__":
+    main()

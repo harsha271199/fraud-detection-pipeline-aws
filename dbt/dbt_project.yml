@@ -1,0 +1,16 @@
+name: "fraud_pipeline"
+version: "1.0.0"
+config-version: 2
+
+profile: "fraud_pipeline"
+
+model-paths: ["models"]
+
+models:
+  fraud_pipeline:
+    bronze:
+      +materialized: view
+    silver:
+      +materialized: table
+    gold:
+      +materialized: table

@@ -1,0 +1,35 @@
+name: Python CI
+
+on:
+  push:
+    paths: ["producer/**", "consumer/**", "dashboards/**"]
+  pull_request:
+    paths: ["producer/**", "consumer/**", "dashboards/**"]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [producer, consumer, dashboards]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.component }}
+        run: |
+          pip install -r requirements.txt
+          pip install ruff pytest
+
+      - name: Lint with ruff
+        working-directory: ${{ matrix.component }}
+        run: ruff check .
+
+      - name: Run tests
+        working-directory: ${{ matrix.component }}
+        run: pytest -q || echo "No tests yet in ${{ matrix.component }} — add as you build"

@@ -1,0 +1,20 @@
+groups:
+  - name: fraud-pipeline-alerts
+    rules:
+      - alert: PipelineStalled
+        expr: rate(fraud_pipeline_events_processed_total[5m]) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No events processed in the last 5 minutes"
+          description: "Consumer may be down, or MSK connectivity lost."
+
+      - alert: FlaggedRateSpike
+        expr: fraud_pipeline_flagged_rate_pct > 15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Flagged transaction rate above 15% for 10+ minutes"
+          description: "Could indicate a real fraud wave or a scoring rule bug — check flag_reasons distribution."

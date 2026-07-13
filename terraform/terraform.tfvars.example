@@ -1,0 +1,9 @@
+# Copy this to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit real values.
+
+# Find your IP at whatismyip.com, then use it in CIDR form: x.x.x.x/32
+my_ip_cidr = "REPLACE_WITH_YOUR_IP/32"
+
+# Redshift password also comes from TF_VAR_redshift_master_password env
+# var if you'd rather not put it in a file at all — that's the safer
+# option and what the README setup steps use.

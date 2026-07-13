@@ -1,0 +1,25 @@
+# Prometheus config for pipeline observability.
+# Consumer/producer expose a /metrics endpoint (add prometheus_client to
+# consumer.py once the pipeline is running end-to-end — not included in
+# the initial consumer.py to keep Week 2 scope focused on streaming logic
+# working first, observability layered on in Week 4 per the build plan).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "fraud-pipeline-consumer"
+    static_configs:
+      - targets: ["consumer:9100"]
+
+  - job_name: "fraud-pipeline-producer"
+    static_configs:
+      - targets: ["producer:9100"]
+
+# Alert on: consumer lag growing, zero events in last 5 min (pipeline
+# stalled), flagged-rate spiking above historical baseline (could mean a
+# real fraud wave, or a bug in the scoring rules — worth investigating
+# either way, which is a good interview talking point).
+rule_files:
+  - "alerts.yml"
