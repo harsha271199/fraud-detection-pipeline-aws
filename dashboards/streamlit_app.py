@@ -51,6 +51,4 @@ else:
     st.subheader("Raw hourly KPIs (snapshot)")
     st.dataframe(df, use_container_width=True)
 
-st.caption(
-    "Full source code, Terraform infrastructure, and architecture: "
-    "see the
+st.caption("Full source code, Terraform infrastructure, and architecture: see the [GitHub repo](https://github.com/harsha271199/fraud-detection-pipeline-aws).")
