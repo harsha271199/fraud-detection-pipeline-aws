@@ -9,11 +9,11 @@ resource "aws_security_group" "redshift" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "Redshift access - restricted to your IP only (see my_ip_cidr)"
+    description = "Redshift access - open for public dashboard (Streamlit Cloud has no fixed IP range); protected by username/password auth, not network restriction"
     from_port   = 5439
     to_port     = 5439
     protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
