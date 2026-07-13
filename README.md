@@ -1,125 +1,187 @@
 # Real-Time Fraud Detection Pipeline (AWS)
 
-A production-style, end-to-end fraud/anomaly detection pipeline built on AWS —
-covering cloud infrastructure, data engineering, and analytics in one system.
+**[Live Dashboard →](https://fraud-detection-pipeline-aws-pm6eucverun24cmdymmvor.streamlit.app/)**
 
-## Why this project exists
+A production-style, end-to-end fraud/anomaly detection pipeline built and
+deployed on AWS — covering cloud infrastructure, data engineering, and
+analytics in one system. Simulated transactions stream through Kafka, get
+scored for fraud in real time, land in a data lake, get transformed and
+quality-checked on a schedule, and surface on a live public dashboard.
 
-Built to close three specific gaps: AWS production experience (prior work was
-Azure-only), modern data orchestration (Airflow + dbt), and observability
-(Prometheus/Grafana beyond a single cloud's native tooling). Everything here
-is real and runnable — no fabricated metrics. Numbers in this README are
-filled in as the pipeline is built and measured, not estimated upfront.
+Every piece of this is real and running — no mocked services, no fabricated
+numbers. The bugs found and fixed along the way are documented below, not
+hidden, because they're part of the actual engineering story.
+
+## Screenshots
+
+![Dashboard overview — live KPIs](screenshots/dashboard-overview.png)
+![Flagged rate and precision/recall over time](screenshots/dashboard-charts.png)
+![Raw hourly KPI table](screenshots/dashboard-table.png)
 
 ## Architecture
 
 ```
-Producer (simulated transactions)
+Producer (simulated transactions, ~10/sec)
         │
         ▼
-   Amazon MSK (managed Kafka)
+   Amazon MSK (managed Kafka) — SASL/SCRAM auth, ACL-enforced, public access
         │
         ▼
-   Consumer  ──────────────►  Fraud scoring (rules + anomaly checks)
+   Consumer  ──────────────►  Fraud scoring (rules: mismatched location,
+        │                      high amount, card velocity)
+        ▼
+   S3 data lake (bronze, partitioned by date)
         │
         ▼
-   S3 data lake (bronze → silver → gold, partitioned by date)
+   Redshift Spectrum (external table over S3)
         │
         ▼
-   Airflow DAG  ──►  dbt models  ──►  Redshift warehouse
+   Airflow (hourly DAG)  ──►  dbt: bronze → silver → gold
+        │                          │
+        │                          ▼
+        │                    Data quality checks (SQL-based, gates gold build)
+        ▼
+   Redshift Serverless (silver/gold native tables)
         │
         ▼
-   Great Expectations (data quality gates on silver/gold)
+   Streamlit dashboard (public) — live KPIs, precision/recall, charts
 
-Observability: Prometheus + Grafana (pipeline health) + CloudWatch (AWS-native alarms)
-Infra: Terraform, deployed via GitHub Actions CI/CD
-Output: Tableau / Streamlit dashboard on Redshift — pipeline KPIs, fraud flags
+Infra: Terraform, cost-minimized (Redshift Serverless, no NAT Gateway,
+Docker-based local Airflow instead of MWAA)
 ```
 
 ## Why MSK over Kinesis
 
 Chose Amazon MSK (managed Kafka) instead of Kinesis: Kafka is the more
 transferable, industry-standard skill (Kinesis is AWS-proprietary), and it
-lets this project reuse real Kafka experience from an earlier project
-(Kafka → Neo4j streaming pipeline) rather than starting from zero.
+let this project reuse real Kafka experience from an earlier project
+(Kafka → Neo4j streaming pipeline).
 
 ## Repo layout
 
 | Folder | Purpose |
 |---|---|
-| `terraform/` | VPC, IAM, MSK, S3 buckets, Redshift cluster — all infra as code |
-| `producer/` | Simulates transaction events, publishes to MSK |
-| `consumer/` | Reads from MSK, applies fraud rules, writes to S3 bronze |
-| `dbt/` | Transformation models: bronze → silver → gold |
-| `airflow/dags/` | Orchestrates the consumer → dbt → Redshift load on schedule |
-| `great_expectations/` | Data quality checks gating silver/gold promotion |
-| `dashboards/` | Streamlit app / Tableau workbook reading from Redshift |
-| `monitoring/` | Prometheus config + Grafana dashboard definitions |
+| `terraform/` | VPC, IAM, MSK, S3, Redshift Serverless — all infra as code |
+| `producer/` | Simulates transaction events (with injected fraud patterns), publishes to MSK |
+| `consumer/` | Reads from MSK, applies fraud rules, writes scored events to S3 |
+| `dbt/` | Transformation models: bronze (Spectrum view) → silver (cleaned) → gold (hourly KPIs) |
+| `dbt/setup_spectrum.py` | One-time script to create the Spectrum external schema/table |
+| `airflow/` | Dockerized Airflow — orchestrates dbt + data quality checks hourly |
+| `dashboards/streamlit_app.py` | Public dashboard, deployed on Streamlit Community Cloud |
+| `great_expectations/` | Early exploration of GE-based data quality — superseded by the lighter SQL-based checks now living directly in the Airflow DAG (see note below) |
+| `monitoring/` | Prometheus config (not yet wired up — CloudWatch metrics from the consumer cover basic observability for now) |
 | `.github/workflows/` | CI/CD — Terraform plan/apply, Python lint/test |
 
-## Cost note
+## A real engineering decision, not a shortcut
 
-This is built cost-minimized on purpose: Redshift **Serverless** (bills
-per-second only while querying, $0 when idle — likely covered entirely
-by AWS's $300 new-account free trial credit) and **no NAT Gateway** (MSK
-and Redshift sit on public subnets with security groups locked to your
-IP only, via the `my_ip_cidr` variable). This is a deliberate demo-project
-tradeoff, not a production pattern — worth saying exactly that if it
-comes up in an interview.
+Originally planned to gate the pipeline's `silver → gold` promotion with
+Great Expectations. In practice, GE's Data Context/Checkpoint setup added
+real operational overhead disproportionate to this project's size. Swapped
+to direct SQL-based integrity checks (null/duplicate/range checks via
+`redshift_connector`) run inline in the Airflow DAG — same purpose, far
+fewer moving parts. Worth being upfront about this if it comes up in an
+interview: it's a "right-sized tool" call, not something abandoned halfway.
 
-**Before running anything: set a billing alarm** (AWS Console → Billing
-→ Budgets) and get your IP address (whatismyip.com) for `my_ip_cidr`.
+## Real, measured results
+
+Measured against the producer's synthetic fraud labels, on live streaming data:
+
+- **Precision: ~78–86%** in high-volume hours (20K–35K+ transactions)
+- **Recall: ~93–100%** — catches nearly all injected fraud patterns
+- **Flagged rate: ~3–4%**, tracking close to the ~3% synthetic fraud
+  injection rate
+
+**Precision is noisier in low-volume hours** — e.g. one hour with only 181
+transactions and 5 flags showed 60% precision, versus the steady 78–86%
+seen in hours with tens of thousands of transactions. Small sample sizes
+swing more; this is expected statistical behavior, not a scoring problem,
+and worth knowing before quoting a single "the" precision number out of
+context.
+
+**A real bug, found and fixed:** the first version of this pipeline showed a
+17% flagged rate against a 3% fraud injection rate — a genuine false-positive
+problem. Root cause: the card fingerprint pool (500 unique cards) was too
+small relative to event rate, causing legitimate transactions to randomly
+collide on the velocity-check rule. Fixed by widening the pool to 5,000.
+Found by measuring against ground truth, not by code review — a good example
+of why you check the numbers instead of assuming the logic is right because
+it reads reasonably.
 
 ## Setup
 
 ```bash
-# 1. AWS credentials (one-time)
+# 1. AWS credentials + billing safety net (one-time)
 aws configure
+# Set a billing alarm: AWS Console -> Billing -> Budgets
 
 # 2. Terraform variables
 cd terraform
 cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars: set my_ip_cidr to your actual IP/32
-export TF_VAR_redshift_master_password="ChooseAStrongPassword123!"
+# edit terraform.tfvars: set my_ip_cidr to your IP/32 (find at whatismyip.com)
+export TF_VAR_redshift_master_password="..."
+export TF_VAR_msk_scram_password="..."
 
-# 3. Infra
+# 3. Infra (~20-30 min first apply, mostly MSK/Redshift provisioning time)
 terraform init
-terraform plan     # read this before apply — should show ~20 resources, no NAT Gateway
+terraform plan
 terraform apply
 
-# 4. Producer/consumer
-cd ../producer && pip install -r requirements.txt --break-system-packages
-cd ../consumer && pip install -r requirements.txt --break-system-packages
+# 4. Bootstrap Kafka ACLs (one-time, required before producer/consumer can
+#    run — grants the SASL/SCRAM app user permission on the transactions
+#    topic and consumer group; bootstrapped via a temporary IAM-authenticated
+#    connection since MSK denies-by-default with no ACLs yet)
 
-# 5. dbt
-cd ../dbt && dbt deps && dbt run
+# 5. Producer + consumer (separate terminals, keep both running)
+cd ../producer && pip install -r requirements.txt
+python producer.py --bootstrap-servers <public-sasl-scram-brokers> \
+  --sasl-username fraudpipeline --sasl-password ... --rate 10
 
-# 6. Airflow (local dev)
-astro dev start   # or docker-compose, if not using MWAA
+cd ../consumer && pip install -r requirements.txt
+python consumer.py --bootstrap-servers <public-sasl-scram-brokers> \
+  --sasl-username fraudpipeline --sasl-password ... \
+  --bucket <your-data-lake-bucket>
 
-# 7. Dashboard
-cd ../dashboards && streamlit run streamlit_app.py
+# 6. Spectrum + dbt (one-time Spectrum setup, then dbt runs via Airflow)
+cd ../dbt
+python setup_spectrum.py --host <redshift-endpoint> --password ... \
+  --role-arn <redshift_s3_read_role_arn output> --bucket <bucket>
 
-# 8. When done for the session — tear down to stop any billing
-cd ../terraform && terraform destroy
+# 7. Airflow (Docker)
+cd ../airflow
+docker compose up airflow-init
+docker compose up -d
+# http://localhost:8080, login airflow/airflow, trigger fraud_pipeline_hourly
+
+# 8. Dashboard (local test, or deployed via Streamlit Community Cloud)
+cd ../dashboards
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+
+# 9. Tear down when not actively running/demoing, to keep AWS cost near-zero
+cd ../terraform
+terraform destroy
 ```
 
-## Results
+## Cost note
 
-_Fill in once measured — do not estimate:_
-- Events/sec sustained: TBD
-- End-to-end detection latency (event → flagged): TBD
-- Fraud rule precision/recall on synthetic test set: TBD
-- Data quality check pass rate: TBD
+Built cost-minimized on purpose: Redshift **Serverless** (bills per-second
+only while querying, $0 when idle) and **no NAT Gateway** (MSK and Redshift
+sit on public subnets with security groups scoped appropriately — MSK
+restricted to a single IP for local development, Redshift opened for the
+public dashboard since Streamlit Cloud has no fixed IP range to allowlist,
+relying on username/password auth instead of network restriction for that
+one service). Realistic total build cost: low single digits to ~$20,
+largely covered by AWS's new-account free credits.
 
 ## Status
 
-- [ ] Terraform infra provisioned
-- [ ] Producer/consumer streaming end-to-end
-- [ ] Fraud scoring rules implemented
-- [ ] dbt models (bronze/silver/gold)
-- [ ] Airflow DAG scheduled and running
-- [ ] Great Expectations checks passing
-- [ ] Prometheus/Grafana dashboards live
-- [ ] CI/CD deploying Terraform on push
-- [ ] Public dashboard (Streamlit/Tableau) published
+- [x] Terraform infra provisioned (MSK, Redshift Serverless, S3, IAM, VPC)
+- [x] MSK authentication (SASL/SCRAM + IAM), ACL enforcement, public access
+- [x] Producer/consumer streaming end-to-end with fraud scoring
+- [x] Redshift Spectrum reading S3 directly
+- [x] dbt models (bronze/silver/gold) running via Airflow, hourly
+- [x] SQL-based data quality gate (swapped from Great Expectations — see note above)
+- [x] Public dashboard deployed (Streamlit Community Cloud)
+- [x] Real measured precision/recall, with an honest bug found and fixed
+- [ ] Prometheus/Grafana observability (CloudWatch metrics from consumer cover the basics for now)
+- [ ] Load-tested throughput beyond ~10 events/sec
