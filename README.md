@@ -1,6 +1,6 @@
 # Real-Time Fraud Detection Pipeline (AWS)
 
-**[Live Dashboard →](https://fraud-detection-pipeline-aws-pm6eucverun24cmdymmvor.streamlit.app/)**
+**[Live Dashboard →](https://fraud-detection-pipeline-aws-8zjfk3cmau69pbxjaafvdo.streamlit.app/)**
 
 A production-style, end-to-end fraud/anomaly detection pipeline built and
 deployed on AWS — covering cloud infrastructure, data engineering, and
