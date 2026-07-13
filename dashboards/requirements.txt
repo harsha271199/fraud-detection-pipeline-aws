@@ -1,3 +1,2 @@
 streamlit
-redshift-connector
 pandas
